@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1b24">
+<title>Jarvis</title>
+<style>
+:root{--bg:#eef3f5;--card:#fff;--text:#10222b;--muted:#5b7280;--line:#d5e0e5;--amber:#b9770e;--amberText:#fff;--me:#10222b;--meText:#fff;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1b24;--card:#14262f;--text:#e6eef2;--muted:#8aa1ad;--line:#223944;--amber:#f2b34a;--amberText:#1a1203;--me:#2a4a58;--meText:#e6eef2;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.04em}
+#gear{padding:6px 10px;border-radius:10px;color:var(--muted)}
+#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:86%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.me{align-self:flex-end;background:var(--me);color:var(--meText);border-bottom-right-radius:4px}
+.ai{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.err{color:#e5484d}
+#bar{display:flex;gap:10px;align-items:flex-end;padding:10px 12px;border-top:1px solid var(--line)}
+#inp{flex:1;resize:none;max-height:120px;padding:11px 14px;border-radius:22px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+#send{width:44px;height:44px;border-radius:50%;background:var(--card);border:1px solid var(--line);flex:none}
+#mic{width:60px;height:60px;border-radius:50%;background:var(--amber);color:var(--amberText);font-size:24px;flex:none;box-shadow:0 0 0 0 var(--amber)}
+#mic.on{animation:pulse 1.2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(242,179,74,.6)}100%{box-shadow:0 0 0 18px rgba(242,179,74,0)}}
+@media (prefers-reduced-motion:reduce){#mic.on{animation:none;outline:3px solid var(--text)}}
+#set{position:fixed;inset:0;background:var(--bg);overflow-y:auto;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
+#set[hidden]{display:none}
+#set label{display:block;margin:16px 0 6px;color:var(--muted);font-size:14px}
+#set input[type=password],#set input[type=text],#set select{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+#set .row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.btn{padding:12px 18px;border-radius:12px;background:var(--amber);color:var(--amberText);font-weight:600;margin-top:20px}
+.btn.alt{background:var(--card);color:var(--text);border:1px solid var(--line);margin-left:8px}
+#set a{color:var(--amber)}
+small{color:var(--muted)}
+</style>
+</head>
+<body>
+<header><h1>Jarvis</h1><button id="gear" aria-label="Settings">Settings</button></header>
+<main id="log" aria-live="polite"></main>
+<div id="bar">
+  <textarea id="inp" rows="1" placeholder="Likho ya mic dabao" aria-label="Message"></textarea>
+  <button id="send" aria-label="Send">&#10148;</button>
+  <button id="mic" aria-label="Bolo">&#127908;</button>
+</div>
+
+<section id="set" hidden>
+  <h1>Settings</h1>
+  <label for="key">Gemini API key</label>
+  <input id="key" type="password" autocomplete="off" placeholder="AIza...">
+  <small>Free key banao: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Key sirf is phone ke browser mein save hoti hai.</small>
+  <label for="model">Model</label>
+  <input id="model" type="text" autocapitalize="off">
+  <small>Error aaye to model ka naam AI Studio se dekhkar badlo.</small>
+  <label for="lang">Voice ki bhasha</label>
+  <select id="lang"><option value="hi-IN">Hindi (hi-IN)</option><option value="en-IN">English India (en-IN)</option></select>
+  <div class="row"><input id="speak" type="checkbox"><label for="speak" style="margin:0">Jawab bolke sunao</label></div>
+  <button class="btn" id="save">Save</button><button class="btn alt" id="clear">Chat saaf karo</button>
+</section>
+
+<script>
+const $ = s => document.querySelector(s);
+const S = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+};
+const SYS = "You are Jarvis, a helpful personal assistant on the user's phone. Reply in the same language the user writes in (Hinglish stays Hinglish). Keep answers short and clear, since they may be read aloud. Avoid markdown symbols. Current date and time: ";
+let hist = [];
+try { hist = JSON.parse(S.get('hist', '[]')); } catch (e) {}
+
+function add(cls, text, extra){
+  const d = document.createElement('div');
+  d.className = 'm ' + cls + (extra ? ' ' + extra : '');
+  d.textContent = text;
+  $('#log').appendChild(d);
+  $('#log').scrollTop = $('#log').scrollHeight;
+  return d;
+}
+
+function speak(t){
+  if (S.get('speak', '1') !== '1' || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t.replace(/[*_`#>]/g, ' ').replace(/\s+/g, ' '));
+  u.lang = S.get('lang', 'hi-IN');
+  speechSynthesis.speak(u);
+}
+
+async function send(text){
+  text = (text || '').trim();
+  if (!text) return;
+  add('me', text);
+  const key = S.get('key', '');
+  if (!key){ add('ai', 'Pehle Settings mein Gemini API key daalo.', 'err'); openSet(); return; }
+  hist.push({ role: 'user', parts: [{ text }] });
+  const bubble = add('ai', '...');
+  let h = hist.slice(-20);
+  while (h.length && h[0].role !== 'user') h.shift();
+  try {
+    const model = encodeURIComponent(S.get('model', 'gemini-flash-latest'));
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYS + new Date().toLocaleString('en-IN') }] },
+        contents: h
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error((d.error && d.error.message) || ('HTTP ' + r.status));
+    const parts = (d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts) || [];
+    const out = parts.map(p => p.text || '').join('').trim() || '(khaali jawab aaya)';
+    bubble.textContent = out;
+    hist.push({ role: 'model', parts: [{ text: out }] });
+    S.set('hist', JSON.stringify(hist.slice(-40)));
+    speak(out);
+  } catch (e){
+    hist.pop();
+    bubble.textContent = 'Error: ' + e.message;
+    bubble.classList.add('err');
+  }
+}
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+function mic(){
+  if (!SR){ add('ai', 'Is browser mein voice input nahi hai. Chrome use karo.', 'err'); return; }
+  if (rec){ rec.stop(); return; }
+  speechSynthesis.cancel();
+  rec = new SR();
+  rec.lang = S.get('lang', 'hi-IN');
+  rec.interimResults = true;
+  let heard = '';
+  $('#mic').classList.add('on');
+  rec.onresult = e => { heard = Array.from(e.results).map(r => r[0].transcript).join(' '); $('#inp').value = heard; };
+  rec.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') add('ai', 'Mic error: ' + e.error + '. Chrome mein mic permission check karo.', 'err'); };
+  rec.onend = () => { $('#mic').classList.remove('on'); rec = null; $('#inp').value = ''; if (heard) send(heard); };
+  rec.start();
+}
+
+function openSet(){
+  $('#key').value = S.get('key', '');
+  $('#model').value = S.get('model', 'gemini-flash-latest');
+  $('#lang').value = S.get('lang', 'hi-IN');
+  $('#speak').checked = S.get('speak', '1') === '1';
+  $('#set').hidden = false;
+}
+
+$('#gear').onclick = openSet;
+$('#save').onclick = () => {
+  S.set('key', $('#key').value.trim());
+  S.set('model', $('#model').value.trim() || 'gemini-flash-latest');
+  S.set('lang', $('#lang').value);
+  S.set('speak', $('#speak').checked ? '1' : '0');
+  $('#set').hidden = true;
+};
+$('#clear').onclick = () => { hist = []; S.set('hist', '[]'); $('#log').innerHTML = ''; $('#set').hidden = true; add('ai', 'Chat saaf. Boliye, kya karna hai?'); };
+$('#send').onclick = () => { const t = $('#inp').value; $('#inp').value = ''; send(t); };
+$('#mic').onclick = mic;
+
+hist.forEach(m => add(m.role === 'user' ? 'me' : 'ai', m.parts[0].text));
+if (!hist.length) add('ai', 'Namaste! Mic dabake bolo, ya likho. Pehle Settings mein API key daal dena.');
+</script>
+</body>
+</html>
